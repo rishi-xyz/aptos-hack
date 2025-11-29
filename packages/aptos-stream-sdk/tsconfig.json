@@ -8,7 +8,7 @@
     "esModuleInterop": true,
     "moduleResolution": "bundler", // Match Next.js
     "sourceMap": true,
-    "lib": ["ES2020", "ESNext", "DOM"],
+    "lib": ["ES2020", "DOM"],
     "rootDir": "src", // Ensure source files are correctly mapped
     "emitDeclarationOnly": false, // Ensure JS files are emitted
     "paths": {

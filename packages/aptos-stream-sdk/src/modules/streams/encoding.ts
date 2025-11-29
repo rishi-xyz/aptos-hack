@@ -53,21 +53,26 @@ function stripWhitespace(s: string) {
 }
 
 function hexToBytes(hex: string): Uint8Array {
-  const normalized = hex.startsWith("0x") ? hex.slice(2) : hex;
+  const normalized = hex.indexOf("0x") === 0 ? hex.slice(2) : hex;
   if (normalized.length % 2 !== 0) throw new Error("Invalid hex length");
   const bytes = new Uint8Array(normalized.length / 2);
   for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = Number.parseInt(normalized.substr(i * 2, 2), 16);
+    bytes[i] = parseInt(normalized.substr(i * 2, 2), 16);
   }
   return bytes;
 }
 
 function bytesToHex(bytes: Uint8Array): string {
-  return "0x" + [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  let hex = "0x";
+  for (let i = 0; i < bytes.length; i++) {
+    const hexByte = bytes[i].toString(16);
+    hex += (hexByte.length === 1 ? "0" : "") + hexByte;
+  }
+  return hex;
 }
 
 function isHexString(s: string) {
-  const normalized = s.startsWith("0x") ? s.slice(2) : s;
+  const normalized = s.indexOf("0x") === 0 ? s.slice(2) : s;
   return /^[0-9a-fA-F]*$/.test(normalized);
 }
 
@@ -124,11 +129,11 @@ function parseSchema(schema: string): SchemaItemWithSignature[] {
       const signature = name ? `${rawType} ${name}` : rawType;
 
       // default value: arrays -> [], tuple -> [] or {}
-      const isArray = rawType.endsWith("[]");
+      const isArray = rawType.slice(-2) === "[]";
       // For internal storage keep the full rawType (with [] if present)
       let defaultValue: SchemaValue;
       if (isArray) defaultValue = [];
-      else if (rawType.startsWith(`${TUPLE_TYPE}(`)) defaultValue = [];
+      else if (rawType.indexOf(`${TUPLE_TYPE}(`) === 0) defaultValue = [];
       else {
         // primitive default
         const prim = rawType.replace(/\s/g, "");
@@ -151,8 +156,8 @@ function parseSchema(schema: string): SchemaItemWithSignature[] {
 function getDefaultValueForTypeName(typeName: string): SchemaValue {
   const t = typeName.trim();
   if (t === BOOL) return false;
-  if (t.startsWith("u") && /^[u]\d+$/i.test(t)) return BigInt(0);
-  if (t === ADDRESS) return "0x" + "00".repeat(32);
+  if (t.indexOf("u") === 0 && /^[u]\d+$/i.test(t)) return BigInt(0);
+  if (t === ADDRESS) return "0x" + new Array(33).join("0"); // 32 zeros + "0x"
   if (t === BYTES32) return new Uint8Array(32);
   return "";
 }
@@ -360,7 +365,7 @@ export class SchemaEncoderAptos {
     const typeTrim = typeRaw.trim();
 
     // array case: endsWith []
-    if (typeTrim.endsWith("[]")) {
+    if (typeTrim.slice(-2) === "[]") {
       const innerType = typeTrim.slice(0, -2).trim();
       // expect value to be an array
       const arr = Array.isArray(value) ? (value as any[]) : [];
@@ -368,7 +373,7 @@ export class SchemaEncoderAptos {
       // We'll write: serializeU32AsUleb128(len) then items.
       serializer.serializeU32AsUleb128(arr.length);
       for (const item of arr) {
-        if (innerType.startsWith(`${TUPLE_TYPE}(`)) {
+        if (innerType.indexOf(`${TUPLE_TYPE}(`) === 0) {
           // tuple array: item should be object or array of values matching tuple components
           this.serializeTuple(serializer, innerType, item);
         } else {
@@ -379,7 +384,7 @@ export class SchemaEncoderAptos {
     }
 
     // tuple (struct) case: startsWith tuple(
-    if (typeTrim.startsWith(`${TUPLE_TYPE}(`)) {
+    if (typeTrim.indexOf(`${TUPLE_TYPE}(`) === 0) {
       // item is object or array
       this.serializeTuple(serializer, typeTrim, value);
       return;
@@ -428,19 +433,19 @@ export class SchemaEncoderAptos {
       const ct = compTypes[k];
       const v = valuesArray[k];
       // nested arrays or nested tuple not supported in this simple parser (but you can extend)
-      if (ct.endsWith("[]")) {
+      if (ct.slice(-2) === "[]") {
         // vector of primitives inside tuple
         const inner = ct.slice(0, -2).trim();
         const arr = Array.isArray(v) ? v : [];
         serializer.serializeU32AsUleb128(arr.length);
         for (const item of arr) {
-          if (inner.startsWith(`${TUPLE_TYPE}(`)) {
+          if (inner.indexOf(`${TUPLE_TYPE}(`) === 0) {
             this.serializeTuple(serializer, inner, item);
           } else {
             serializePrimitive(serializer, inner, item);
           }
         }
-      } else if (ct.startsWith(`${TUPLE_TYPE}(`)) {
+      } else if (ct.indexOf(`${TUPLE_TYPE}(`) === 0) {
         this.serializeTuple(serializer, ct, v);
       } else {
         serializePrimitive(serializer, ct, v);
@@ -450,19 +455,19 @@ export class SchemaEncoderAptos {
 
   private deserializeValueByType(deser: Deserializer, typeRaw: string): any {
     const t = typeRaw.trim();
-    if (t.endsWith("[]")) {
+    if (t.slice(-2) === "[]") {
       const inner = t.slice(0, -2).trim();
       // read length (uleb128 as u32)
       const len = deser.deserializeUleb128AsU32();
       const arr: any[] = [];
       for (let i = 0; i < len; i++) {
-        if (inner.startsWith(`${TUPLE_TYPE}(`)) arr.push(this.deserializeTuple(deser, inner));
+        if (inner.indexOf(`${TUPLE_TYPE}(`) === 0) arr.push(this.deserializeTuple(deser, inner));
         else arr.push(deserializePrimitive(deser, inner));
       }
       return arr;
     }
 
-    if (t.startsWith(`${TUPLE_TYPE}(`)) {
+    if (t.indexOf(`${TUPLE_TYPE}(`) === 0) {
       return this.deserializeTuple(deser, t);
     }
 
