@@ -1,6 +1,6 @@
 // import { AccountAddressInput } from '@aptos-labs/ts-sdk';
 
-export type ActivityType = 'all' | 'transactions' | 'events' | 'resources';
+export type ActivityType = 'all' | 'transactions' | 'events' | 'resources' | 'balance_change';
 
 export interface ActivityEvent {
   type: ActivityType;
