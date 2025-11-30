@@ -3,20 +3,68 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Activity, TrendingUp, AlertCircle, Plus, ArrowUpRight, ArrowDownRight, Fish, Clock, DollarSign, Loader2 } from "lucide-react"
+import { Activity, TrendingUp, AlertCircle, Plus, ArrowUpRight, ArrowDownRight, Fish, Clock, DollarSign, Loader2, Wallet } from "lucide-react"
 import Link from "next/link"
 import { useWhales } from "@/hooks/useWhales"
 import { formatDistanceToNow } from "date-fns"
 import { calculateBalanceChanges, formatAptAmount } from "@/lib/api"
+import { useUser } from "@/contexts/UserContext"
 
 export default function DashboardPage() {
-  const { whales, loading, error, recentEvents, stats, addWhale, removeWhale } = useWhales()
+  const { user, connect, disconnect, isLoading: userLoading } = useUser();
+  const { whales, loading, error, recentEvents, stats, addWhale, removeWhale } = useWhales(user?.address);
 
   const handleAddWhale = async (address: string) => {
+    if (!user) {
+      alert('Please connect your wallet first');
+      return;
+    }
+    
     const success = await addWhale(address)
     if (success) {
       console.log('Whale added successfully')
     }
+  }
+
+  // Mock wallet connection for demo
+  const handleConnectWallet = async () => {
+    try {
+      // In a real app, this would connect to actual wallet
+      const mockAddress = "0x1234567890abcdef1234567890abcdef12345678";
+      await connect(mockAddress);
+    } catch (error) {
+      console.error('Failed to connect wallet:', error);
+      // Handle error (show toast, etc.)
+    }
+  }
+
+  if (userLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-slate-900 dark:to-blue-900 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-slate-900 dark:to-blue-900 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <Wallet className="h-16 w-16 mx-auto mb-4 text-blue-600" />
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Connect Your Wallet</h1>
+          <p className="text-gray-600 dark:text-gray-300 mb-8">
+            Connect your wallet to start tracking whales and managing your trading strategies
+          </p>
+          <Button onClick={handleConnectWallet} size="lg" className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Wallet className="h-5 w-5 mr-2" />
+            Connect Wallet
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const handleRemoveWhale = async (address: string) => {

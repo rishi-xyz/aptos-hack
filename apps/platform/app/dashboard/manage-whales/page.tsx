@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ArrowLeft, Plus, Fish, CheckCircle, AlertCircle, Loader2, Search, Trash2, Eye } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useUser } from "@/contexts/UserContext"
 import { useWhales } from "@/hooks/useWhales"
 
 export default function ManageWhalesPage() {
@@ -17,7 +18,8 @@ export default function ManageWhalesPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const { addWhale, removeWhale, whales } = useWhales()
+  const { user } = useUser()
+  const { addWhale, removeWhale, whales } = useWhales(user?.address)
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {

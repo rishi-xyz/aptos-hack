@@ -1,0 +1,80 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User model for wallet addresses
+model User {
+  id              String   @id @default(cuid())
+  address         String   @unique
+  createdAt       DateTime @default(now())
+  lastConnected   DateTime @default(now())
+  connectionCount Int      @default(0)
+  metadata        Json?
+  
+  // Relations
+  trackedWhales   UserWhale[]
+  
+  @@map("users")
+}
+
+// Whale addresses that users track
+model Whale {
+  id              String   @id @default(cuid())
+  address         String   @unique
+  createdAt       DateTime @default(now())
+  lastActivity    DateTime?
+  riskLevel       String?  @default("medium")
+  tags            String[] @default([])
+  
+  // Relations
+  subscribers     UserWhale[]
+  activities      WhaleActivity[]
+  
+  @@map("whales")
+}
+
+// Join table for user-whale relationships
+model UserWhale {
+  id         String   @id @default(cuid())
+  userId     String
+  whaleId    String
+  trackedAt  DateTime @default(now())
+  metadata   Json?
+  
+  // Relations
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  whale      Whale    @relation(fields: [whaleId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, whaleId])
+  @@map("user_whales")
+}
+
+// Whale activity tracking
+model WhaleActivity {
+  id               String   @id @default(cuid())
+  whaleId          String
+  transactionHash  String   @unique
+  type             String   // 'buy', 'sell', 'transfer'
+  amount           String   // Amount in smallest units
+  fromAddress      String
+  toAddress        String
+  blockHeight      BigInt?
+  timestamp        DateTime @default(now())
+  balanceChange    String?
+  metadata         Json?
+  
+  // Relations
+  whale            Whale    @relation(fields: [whaleId], references: [id], onDelete: Cascade)
+  
+  @@map("whale_activities")
+}

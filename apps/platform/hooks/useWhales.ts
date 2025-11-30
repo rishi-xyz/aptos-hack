@@ -10,7 +10,7 @@ export interface WhaleWithStatus extends Whale {
   recentEvents: BalanceChangeEvent[];
 }
 
-export function useWhales() {
+export function useWhales(userAddress?: string) {
   const [whales, setWhales] = useState<WhaleWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,9 +25,14 @@ export function useWhales() {
 
   // Fetch initial whale data
   const fetchWhales = useCallback(async () => {
+    if (!userAddress) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
-      const data = await whaleApi.getWhales();
+      const data = await whaleApi.getWhales(userAddress);
       
       // Transform whale addresses into WhaleWithStatus objects
       const whalesWithStatus: WhaleWithStatus[] = data.whales.map(address => ({
@@ -48,31 +53,61 @@ export function useWhales() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userAddress]);
 
   // Add a new whale
-  const addWhale = useCallback(async (address: string) => {
+  const addWhale = useCallback(async (whaleAddress: string) => {
+    if (!userAddress) {
+      throw new Error('User address is required');
+    }
+
     try {
-      await whaleApi.addWhale(address);
-      await fetchWhales(); // Refresh the list
+      const data = await whaleApi.addWhale(whaleAddress, userAddress);
+      
+      // Update local state
+      setWhales(prev => [...prev, {
+        address: whaleAddress,
+        status: 'active' as const,
+        isActive: true,
+        recentEvents: []
+      }]);
+      
+      setStats(prev => ({
+        ...prev,
+        totalWhales: prev.totalWhales + 1,
+        activeWhales: prev.activeWhales + 1
+      }));
+      
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add whale');
-      return false;
+      throw err;
     }
-  }, [fetchWhales]);
+  }, [userAddress]);
 
   // Remove a whale
-  const removeWhale = useCallback(async (address: string) => {
+  const removeWhale = useCallback(async (whaleAddress: string) => {
+    if (!userAddress) {
+      throw new Error('User address is required');
+    }
+
     try {
-      await whaleApi.removeWhale(address);
-      await fetchWhales(); // Refresh the list
+      const data = await whaleApi.removeWhale(whaleAddress, userAddress);
+      
+      // Update local state
+      setWhales(prev => prev.filter(w => w.address !== whaleAddress));
+      setRecentEvents(prev => prev.filter(e => e.address !== whaleAddress));
+      
+      setStats(prev => ({
+        ...prev,
+        totalWhales: prev.totalWhales - 1,
+        activeWhales: prev.activeWhales - 1
+      }));
+      
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove whale');
-      return false;
+      throw err;
     }
-  }, [fetchWhales]);
+  }, [userAddress]);
 
   // Handle real-time balance change events
   const handleBalanceChange = useCallback((event: BalanceChangeEvent) => {
@@ -121,16 +156,17 @@ export function useWhales() {
 
   // Initialize data and SSE connection
   useEffect(() => {
-    fetchWhales();
-    
-    // Subscribe to real-time updates
-    whaleStream.subscribe(handleBalanceChange);
-    
-    return () => {
-      // Cleanup SSE connection
-      whaleStream.unsubscribe(handleBalanceChange);
-    };
-  }, [fetchWhales, handleBalanceChange]);
+    if (userAddress) {
+      fetchWhales();
+      
+      // Subscribe to real-time updates
+      whaleStream.subscribe(handleBalanceChange);
+      
+      return () => {
+        whaleStream.unsubscribe(handleBalanceChange);
+      };
+    }
+  }, [userAddress, fetchWhales, handleBalanceChange]);
 
   return {
     whales,

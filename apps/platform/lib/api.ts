@@ -120,12 +120,13 @@ export interface Strategy {
 // API functions
 export const whaleApi = {
   // Add a whale to track
-  addWhale: async (address: string): Promise<{ message: string; address: string; totalTracked: number }> => {
-    const response = await fetch(`${API_BASE_URL}/add/whale/${address}`, {
+  addWhale: async (whaleAddress: string, userAddress: string): Promise<{ message: string; address: string; userAddress: string; totalTracked: number }> => {
+    const response = await fetch(`${API_BASE_URL}/add/whale/${whaleAddress}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ userAddress }),
     });
     
     if (!response.ok) {
@@ -136,9 +137,9 @@ export const whaleApi = {
     return response.json();
   },
 
-  // Get all tracked whales
-  getWhales: async (): Promise<{ whales: string[]; total: number }> => {
-    const response = await fetch(`${API_BASE_URL}/whales`);
+  // Get user's tracked whales
+  getWhales: async (userAddress: string): Promise<{ whales: string[]; total: number; userAddress: string; trackedAddresses: any[] }> => {
+    const response = await fetch(`${API_BASE_URL}/whales?userAddress=${userAddress}`);
     
     if (!response.ok) {
       throw new Error('Failed to fetch whales');
@@ -147,10 +148,14 @@ export const whaleApi = {
     return response.json();
   },
 
-  // Remove a whale
-  removeWhale: async (address: string): Promise<{ message: string; address: string; remainingTracked: number }> => {
-    const response = await fetch(`${API_BASE_URL}/whale/${address}`, {
+  // Remove a whale from tracking
+  removeWhale: async (whaleAddress: string, userAddress: string): Promise<{ message: string; address: string; userAddress: string; remainingTracked: number }> => {
+    const response = await fetch(`${API_BASE_URL}/whale/${whaleAddress}`, {
       method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userAddress }),
     });
     
     if (!response.ok) {
@@ -192,6 +197,25 @@ export const whaleApi = {
   },
 };
 
+// Wallet connection API
+export const walletApi = {
+  connect: async (userAddress: string) => {
+    const response = await fetch(`${API_BASE_URL}/wallet/connect`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userAddress }),
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to connect wallet');
+    }
+    
+    return response.json();
+  }
+};
+
 // SSE connection for real-time balance changes
 export class WhaleStreamService {
   private eventSource: EventSource | null = null;
@@ -201,11 +225,20 @@ export class WhaleStreamService {
   private reconnectDelay = 1000;
 
   constructor() {
-    this.connect();
+    // Only connect if we're in a browser environment
+    if (typeof window !== 'undefined') {
+      this.connect();
+    }
   }
 
   private connect() {
     try {
+      // Check if EventSource is available (browser-only API)
+      if (typeof EventSource === 'undefined') {
+        console.warn('EventSource is not available. SSE connection disabled.');
+        return;
+      }
+      
       this.eventSource = new EventSource(`${API_BASE_URL}/events`);
       
       this.eventSource.onopen = () => {
