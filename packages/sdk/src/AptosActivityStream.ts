@@ -29,12 +29,22 @@ export class AptosActivityStream {
   private watchedAddresses: Set<string> = new Set();
   private lastProcessedTx: { [key: string]: string } = {};
   private tokenBalances: { [key: string]: TokenBalance[] } = {};
+  private batchSize: number;
+  private pollingIntervalMs: number;
+  private requestDelay: number;
+  private maxConcurrentRequests: number;
+  private requestQueue: Array<() => Promise<void>> = [];
+  private isProcessingQueue: boolean = false;
 
   constructor(options: StreamOptions = {}) {
     this.nodeUrl = options.nodeUrl || 'https://fullnode.mainnet.aptoslabs.com';
     this.reconnect = options.reconnect ?? true;
     this.reconnectInterval = options.reconnectInterval || 5000;
     this.maxReconnectAttempts = options.maxReconnectAttempts || 5;
+    this.batchSize = options.batchSize || 3;
+    this.pollingIntervalMs = options.pollingInterval || 15000;
+    this.requestDelay = options.requestDelay || 1000;
+    this.maxConcurrentRequests = options.maxConcurrentRequests || 2;
 
     const config = new AptosConfig({
       network: this.nodeUrl.includes('testnet') ? Network.TESTNET : 
@@ -133,137 +143,224 @@ export class AptosActivityStream {
   /**
    * Start polling for address activities
    */
-  private startPolling(interval: number = 10000): void {
+  private startPolling(): void {
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
     }
 
     this.pollingInterval = setInterval(async () => {
       try {
-        await this.checkAddressActivities();
+        await this.checkAddressActivitiesBatched();
       } catch (error) {
         console.error('Error checking address activities:', error);
       }
-    }, interval);
+    }, this.pollingIntervalMs);
   }
 
   /**
-   * Check for new activities on watched addresses
+   * Check for new activities on watched addresses using batching and rate limiting
    */
-  private async checkAddressActivities(): Promise<void> {
-    console.log(`🔍 checkAddressActivities: Starting check for ${this.watchedAddresses.size} addresses`);
+  private async checkAddressActivitiesBatched(): Promise<void> {
+    console.log(`🔍 checkAddressActivitiesBatched: Starting batched check for ${this.watchedAddresses.size} addresses`);
     if (this.watchedAddresses.size === 0) {
-      console.log('🔍 checkAddressActivities: No addresses to watch');
+      console.log('🔍 checkAddressActivitiesBatched: No addresses to watch');
       return;
     }
 
-    for (const address of this.watchedAddresses) {
-      console.log(`🔍 checkAddressActivities: Processing address ${address}`);
-      try {
-        // Get current token balances first - this also validates the address exists
-        console.log(`🔍 checkAddressActivities: Getting token balances for ${address}`);
-        const currentBalances = await this.getTokenBalances(address);
-        console.log(`🔍 checkAddressActivities: Got ${currentBalances.length} balances for ${address}`);
-        
-        // Log initial balance information
-        if (!this.tokenBalances[address]) {
-          const network = this.nodeUrl.includes('testnet') ? 'testnet' : this.nodeUrl.includes('devnet') ? 'devnet' : 'mainnet';
-          console.log(`\n🔍 Address ${address} found on ${network}`);
-          console.log(`💰 Current balances: ${currentBalances.map(b => `${b.symbol || b.coinType}: ${b.amount}`).join(', ') || 'No tokens'}`);
-          console.log(`📊 Monitoring for transactions and balance changes...\n`);
+    const addresses = Array.from(this.watchedAddresses);
+    const batches = this.createBatches(addresses, this.batchSize);
+    
+    console.log(`🔍 checkAddressActivitiesBatched: Processing ${batches.length} batches of size ${this.batchSize}`);
+    
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      console.log(`🔍 checkAddressActivitiesBatched: Processing batch ${i + 1}/${batches.length} with ${batch.length} addresses`);
+      
+      // Process batch with concurrency control
+      const promises = batch.map(address => 
+        this.queueRequest(() => this.processAddress(address))
+      );
+      
+      await Promise.allSettled(promises);
+      
+      // Add delay between batches to avoid rate limiting
+      if (i < batches.length - 1) {
+        console.log(`🔍 checkAddressActivitiesBatched: Delaying ${this.requestDelay}ms before next batch`);
+        await this.delay(this.requestDelay);
+      }
+    }
+    
+    console.log(`🔍 checkAddressActivitiesBatched: Completed batched check for all addresses`);
+  }
+
+  /**
+   * Create batches from array of addresses
+   */
+  private createBatches<T>(items: T[], batchSize: number): T[][] {
+    const batches: T[][] = [];
+    for (let i = 0; i < items.length; i += batchSize) {
+      batches.push(items.slice(i, i + batchSize));
+    }
+    return batches;
+  }
+
+  /**
+   * Queue a request to control concurrency
+   */
+  private async queueRequest<T>(request: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const wrappedRequest = async () => {
+        try {
+          const result = await request();
+          resolve(result);
+        } catch (error) {
+          reject(error);
         }
+      };
+      
+      this.requestQueue.push(wrappedRequest);
+      this.processQueue();
+    });
+  }
+
+  /**
+   * Process the request queue with concurrency control
+   */
+  private async processQueue(): Promise<void> {
+    if (this.isProcessingQueue || this.requestQueue.length === 0) {
+      return;
+    }
+    
+    this.isProcessingQueue = true;
+    
+    while (this.requestQueue.length > 0) {
+      const batch = this.requestQueue.splice(0, this.maxConcurrentRequests);
+      await Promise.allSettled(batch.map(request => request()));
+      
+      // Small delay between concurrent batches
+      if (this.requestQueue.length > 0) {
+        await this.delay(200);
+      }
+    }
+    
+    this.isProcessingQueue = false;
+  }
+
+  /**
+   * Utility function for delays
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Process a single address (extracted from original checkAddressActivities)
+   */
+  private async processAddress(address: string): Promise<void> {
+    console.log(`🔍 processAddress: Processing address ${address}`);
+    try {
+      // Get current token balances first
+      console.log(`🔍 processAddress: Getting token balances for ${address}`);
+      const currentBalances = await this.getTokenBalances(address);
+      console.log(`🔍 processAddress: Got ${currentBalances.length} balances for ${address}`);
+      
+      // Log initial balance information
+      if (!this.tokenBalances[address]) {
+        const network = this.nodeUrl.includes('testnet') ? 'testnet' : this.nodeUrl.includes('devnet') ? 'devnet' : 'mainnet';
+        console.log(`\n🔍 Address ${address} found on ${network}`);
+        console.log(`💰 Current balances: ${currentBalances.map(b => `${b.symbol || b.coinType}: ${b.amount}`).join(', ') || 'No tokens'}`);
+        console.log(`📊 Monitoring for transactions and balance changes...\n`);
+      }
+      
+      // Check if balances changed
+      const balancesChanged = JSON.stringify(currentBalances) !== JSON.stringify(this.tokenBalances[address]);
+      console.log(`🔍 processAddress: Balances changed: ${balancesChanged}`);
+      if (balancesChanged && this.tokenBalances[address]) {
+        console.log(`🔍 processAddress: Creating balance change event`);
+        // Create balance change event
+        const balanceEvent: ActivityEvent = {
+          type: 'balance_change' as ActivityType,
+          address,
+          timestamp: Date.now(),
+          data: {
+            previous: this.tokenBalances[address],
+            current: currentBalances
+          }
+        };
+        console.log(`🔍 processAddress: Broadcasting balance change event`);
+        this.broadcast(balanceEvent);
+      }
+      this.tokenBalances[address] = currentBalances;
+
+      // Check for transactions
+      console.log(`🔍 processAddress: Getting transactions for ${address}`);
+      const txs = await this.aptos.getAccountTransactions({
+        accountAddress: address,
+        options: {
+          limit: 10
+        },
+      });
+      console.log(`🔍 processAddress: Got ${txs.length} transactions for ${address}`);
+
+      if (txs.length > 0) {
+        const latestTx = txs[0];
+        const txHash = 'hash' in latestTx ? latestTx.hash : String(latestTx);
+        console.log(`🔍 processAddress: Latest tx hash: ${txHash}`);
         
-        // Check if balances changed
-        const balancesChanged = JSON.stringify(currentBalances) !== JSON.stringify(this.tokenBalances[address]);
-        console.log(`🔍 checkAddressActivities: Balances changed: ${balancesChanged}`);
-        if (balancesChanged && this.tokenBalances[address]) {
-          console.log(`🔍 checkAddressActivities: Creating balance change event`);
-          // Create balance change event
-          const balanceEvent: ActivityEvent = {
-            type: 'balance_change' as ActivityType,
+        if (this.lastProcessedTx[address] !== txHash) {
+          console.log(`🔍 processAddress: New transaction detected`);
+          this.lastProcessedTx[address] = txHash;
+          
+          // Analyze transaction type
+          console.log(`🔍 processAddress: Analyzing transaction`);
+          const analysis = this.analyzeTransaction(latestTx);
+          console.log(`🔍 processAddress: Transaction analysis:`, analysis);
+          
+          // Create activity event
+          const activityEvent: ActivityEvent = {
+            type: 'transactions',
             address,
             timestamp: Date.now(),
             data: {
-              previous: this.tokenBalances[address],
-              current: currentBalances
-            }
+              ...latestTx,
+              analysis,
+              balances: currentBalances
+            },
+            txHash,
+            blockHeight: 'version' in latestTx ? Number(latestTx.version) : 0
           };
-          console.log(`🔍 checkAddressActivities: Broadcasting balance change event`);
-          this.broadcast(balanceEvent);
-        }
-        this.tokenBalances[address] = currentBalances;
-
-        // Check for transactions
-        console.log(`🔍 checkAddressActivities: Getting transactions for ${address}`);
-        const txs = await this.aptos.getAccountTransactions({
-          accountAddress: address,
-          options: {
-            limit: 10
-          },
-        });
-        console.log(`🔍 checkAddressActivities: Got ${txs.length} transactions for ${address}`);
-
-        if (txs.length > 0) {
-          const latestTx = txs[0];
-          const txHash = 'hash' in latestTx ? latestTx.hash : String(latestTx);
-          console.log(`🔍 checkAddressActivities: Latest tx hash: ${txHash}`);
-          
-          if (this.lastProcessedTx[address] !== txHash) {
-            console.log(`🔍 checkAddressActivities: New transaction detected`);
-            this.lastProcessedTx[address] = txHash;
-            
-            // Analyze transaction type
-            console.log(`🔍 checkAddressActivities: Analyzing transaction`);
-            const analysis = this.analyzeTransaction(latestTx);
-            console.log(`🔍 checkAddressActivities: Transaction analysis:`, analysis);
-            
-            // Create activity event
-            const activityEvent: ActivityEvent = {
-              type: 'transactions',
-              address,
-              timestamp: Date.now(),
-              data: {
-                ...latestTx,
-                analysis,
-                balances: currentBalances
-              },
-              txHash,
-              blockHeight: 'version' in latestTx ? Number(latestTx.version) : 0
-            };
-            console.log(`🔍 checkAddressActivities: Broadcasting transaction event`);
-            // Broadcast to all clients
-            this.broadcast(activityEvent);
-          } else {
-            console.log(`🔍 checkAddressActivities: No new transaction (same hash as last processed)`);
-          }
+          console.log(`🔍 processAddress: Broadcasting transaction event`);
+          // Broadcast to all clients
+          this.broadcast(activityEvent);
         } else {
-          // Account exists but has no transactions
-          if (!this.lastProcessedTx[address] || this.lastProcessedTx[address] === 'not_found') {
-            const network = this.nodeUrl.includes('testnet') ? 'testnet' : this.nodeUrl.includes('devnet') ? 'devnet' : 'mainnet';
-            console.log(`ℹ️  Address ${address} exists on ${network} but has no transactions`);
-            this.lastProcessedTx[address] = 'no_transactions';
-          }
+          console.log(`🔍 processAddress: No new transaction (same hash as last processed)`);
         }
-      } catch (error: any) {
-        console.error(`🔍 checkAddressActivities: Error for address ${address}:`, error.message || error);
-        console.error(`🔍 checkAddressActivities: Full error:`, error);
-        // Handle 404 errors (address not found)
-        if (error.status === 404) {
-          if (!this.lastProcessedTx[address]) {
-            const network = this.nodeUrl.includes('testnet') ? 'testnet' : this.nodeUrl.includes('devnet') ? 'devnet' : 'mainnet';
-            console.log(`❌ Address ${address} not found on ${network}`);
-            this.lastProcessedTx[address] = 'not_found';
-          }
-        } else {
-          console.error(`❌ Error checking activities for address ${address}:`, error.message || error);
-          // Try to get more detailed error information
-          if (error.response?.data) {
-            console.error(`   Details:`, JSON.stringify(error.response.data, null, 2));
-          }
+      } else {
+        // Account exists but has no transactions
+        if (!this.lastProcessedTx[address] || this.lastProcessedTx[address] === 'not_found') {
+          const network = this.nodeUrl.includes('testnet') ? 'testnet' : this.nodeUrl.includes('devnet') ? 'devnet' : 'mainnet';
+          console.log(`ℹ️  Address ${address} exists on ${network} but has no transactions`);
+          this.lastProcessedTx[address] = 'no_transactions';
+        }
+      }
+    } catch (error: any) {
+      console.error(`🔍 processAddress: Error for address ${address}:`, error.message || error);
+      console.error(`🔍 processAddress: Full error:`, error);
+      // Handle 404 errors (address not found)
+      if (error.status === 404) {
+        if (!this.lastProcessedTx[address]) {
+          const network = this.nodeUrl.includes('testnet') ? 'testnet' : this.nodeUrl.includes('devnet') ? 'devnet' : 'mainnet';
+          console.log(`❌ Address ${address} not found on ${network}`);
+          this.lastProcessedTx[address] = 'not_found';
+        }
+      } else {
+        console.error(`❌ Error checking activities for address ${address}:`, error.message || error);
+        // Try to get more detailed error information
+        if (error.response?.data) {
+          console.error(`   Details:`, JSON.stringify(error.response.data, null, 2));
         }
       }
     }
-    console.log(`🔍 checkAddressActivities: Completed check for all addresses`);
   }
 
   /**
@@ -353,7 +450,7 @@ export class AptosActivityStream {
   }
 
   /**
-   * Get token balances for an address
+   * Get token balances for an address with optimized API calls
    */
   private async getTokenBalances(address: string): Promise<TokenBalance[]> {
     console.log(`🔍 getTokenBalances: Starting for address ${address}`);
@@ -367,31 +464,26 @@ export class AptosActivityStream {
       });
       console.log(`🔍 getTokenBalances: Got ${resources.length} resources for ${address}`);
 
-      // Log all resource types for debugging
-      resources.forEach((resource, index) => {
-        console.log(`🔍 getTokenBalances: Resource ${index}: ${resource.type}`);
-      });
+      // Filter for coin store resources upfront to reduce processing
+      const coinResources = resources.filter(resource => 
+        resource.type.includes('CoinStore') || resource.type.includes('0x1::coin::CoinStore')
+      );
+      console.log(`🔍 getTokenBalances: Found ${coinResources.length} coin resources`);
 
-      for (let i = 0; i < resources.length; i++) {
-        const resource = resources[i];
-        console.log(`🔍 getTokenBalances: Processing resource ${i}: ${resource.type}`);
+      for (const resource of coinResources) {
+        console.log(`🔍 getTokenBalances: Processing resource: ${resource.type}`);
         
         // Look for coin store resources
         if (resource.type.includes('CoinStore')) {
-          console.log(`🔍 getTokenBalances: Found CoinStore resource`);
           const coinData = (resource.data as any).coin;
-          console.log(`🔍 getTokenBalances: Coin data:`, coinData);
           
           if (coinData && coinData.value > 0) {
-            console.log(`🔍 getTokenBalances: Coin has value: ${coinData.value}`);
             // Extract coin type from resource type
             const coinTypeMatch = resource.type.match(/CoinStore<(.+)>/);
             const coinType = coinTypeMatch ? coinTypeMatch[1] : resource.type;
-            console.log(`🔍 getTokenBalances: Extracted coin type: ${coinType}`);
             
             // Get symbol from coin type
             const symbol = this.extractSymbol(coinType);
-            console.log(`🔍 getTokenBalances: Symbol: ${symbol}`);
             
             const balance = {
               coinType,
@@ -400,14 +492,11 @@ export class AptosActivityStream {
             };
             console.log(`🔍 getTokenBalances: Adding balance:`, balance);
             balances.push(balance);
-          } else {
-            console.log(`🔍 getTokenBalances: Coin has no value or coinData is null`);
           }
         }
         
         // Also check for direct coin resources (some networks store them differently)
         if (resource.type.includes('0x1::coin::CoinStore')) {
-          console.log(`🔍 getTokenBalances: Found direct CoinStore resource`);
           const coinData = (resource.data as any).coin;
           if (coinData && coinData.value > 0) {
             const balance = {
@@ -421,7 +510,7 @@ export class AptosActivityStream {
         }
       }
       
-      // Try alternative method to get APT balance if not found
+      // Try alternative method to get APT balance only if no APT found
       const hasAptBalance = balances.some(b => b.coinType.includes('aptos_coin'));
       if (!hasAptBalance) {
         console.log(`🔍 getTokenBalances: No APT balance found, trying alternative method`);

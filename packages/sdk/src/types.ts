@@ -16,6 +16,10 @@ export interface StreamOptions {
   reconnect?: boolean;
   reconnectInterval?: number;
   maxReconnectAttempts?: number;
+  batchSize?: number;
+  pollingInterval?: number;
+  requestDelay?: number;
+  maxConcurrentRequests?: number;
 }
 
 export interface StreamHandler {
