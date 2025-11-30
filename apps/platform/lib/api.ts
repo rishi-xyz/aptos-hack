@@ -98,6 +98,25 @@ export interface WhaleStats {
   alerts: number;
 }
 
+export interface StrategyAllocation {
+  aggressive: number;
+  moderate: number;
+  conservative: number;
+  totalBudget: number;
+}
+
+export interface Strategy {
+  id: string;
+  name: string;
+  description: string;
+  riskLevel: 'low' | 'moderate' | 'high';
+  expectedReturn: string;
+  minAmount: number;
+  color: string;
+  icon: string;
+  features: string[];
+}
+
 // API functions
 export const whaleApi = {
   // Add a whale to track
@@ -151,6 +170,25 @@ export const whaleApi = {
     }
     
     return response.json();
+  },
+
+  // Strategy allocation functions (using localStorage for now)
+  saveStrategyAllocation: async (allocation: StrategyAllocation): Promise<{ success: boolean }> => {
+    try {
+      localStorage.setItem('strategyAllocation', JSON.stringify(allocation));
+      return { success: true };
+    } catch (error) {
+      throw new Error('Failed to save allocation');
+    }
+  },
+
+  getStrategyAllocation: async (): Promise<StrategyAllocation | null> => {
+    try {
+      const stored = localStorage.getItem('strategyAllocation');
+      return stored ? JSON.parse(stored) : null;
+    } catch (error) {
+      return null;
+    }
   },
 };
 

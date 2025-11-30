@@ -93,12 +93,20 @@ export default function DashboardPage() {
             <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">Whale Dashboard</h1>
             <p className="text-lg text-gray-600 dark:text-gray-300">Monitor whale activity in real-time</p>
           </div>
-          <Link href="/dashboard/manage-whales">
-            <Button size="lg" className="bg-blue-600 hover:bg-blue-700 text-white">
-              <Plus className="h-5 w-5 mr-2" />
-              Add Whale
-            </Button>
-          </Link>
+          <div className="flex space-x-3">
+            <Link href="/dashboard/strategies">
+              <Button size="lg" variant="outline" className="border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white">
+                <TrendingUp className="h-5 w-5 mr-2" />
+                Strategies
+              </Button>
+            </Link>
+            <Link href="/dashboard/manage-whales">
+              <Button size="lg" className="bg-blue-600 hover:bg-blue-700 text-white">
+                <Plus className="h-5 w-5 mr-2" />
+                Add Whale
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Stats Cards */}

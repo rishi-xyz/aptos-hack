@@ -15,13 +15,18 @@ import {
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Activity, Users, Settings, Waves } from "lucide-react"
+import { Activity, Users, Settings, Waves, TrendingUp } from "lucide-react"
 
 const items = [
   {
     title: "Monitor",
     url: "/dashboard",
     icon: Activity,
+  },
+  {
+    title: "Strategies",
+    url: "/dashboard/strategies",
+    icon: TrendingUp,
   },
   {
     title: "Manage Whales",
