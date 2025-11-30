@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from 'react';
-import { whaleApi, whaleStream, Whale, BalanceChangeEvent, calculateBalanceChanges } from '@/lib/api';
+import { whaleApi, whaleStream, Whale, BalanceChangeEvent, calculateBalanceChanges, formatAptAmount } from '@/lib/api';
 
 export interface WhaleWithStatus extends Whale {
   address: string;
@@ -18,7 +18,8 @@ export function useWhales() {
   const [stats, setStats] = useState({
     totalWhales: 0,
     activeWhales: 0,
-    totalVolume: '$0',
+    totalVolume: 0, // Store as raw number for calculations
+    netVolume: 0,   // Track net volume (buys - sells)
     alerts: 0
   });
 
@@ -96,11 +97,26 @@ export function useWhales() {
       return whale;
     }));
 
-    // Update stats (mock volume calculation for now)
-    setStats(prev => ({
-      ...prev,
-      alerts: prev.alerts + 1
-    }));
+    // Calculate volume changes
+    const balanceChanges = calculateBalanceChanges(event);
+    const aptChange = balanceChanges.find(change => change.symbol === 'APT');
+    
+    if (aptChange) {
+      const amount = parseFloat(aptChange.amount);
+      const signedAmount = aptChange.type === 'buy' ? amount : -amount;
+      
+      setStats(prev => ({
+        ...prev,
+        totalVolume: prev.totalVolume + amount,
+        netVolume: prev.netVolume + signedAmount,
+        alerts: prev.alerts + 1
+      }));
+    } else {
+      setStats(prev => ({
+        ...prev,
+        alerts: prev.alerts + 1
+      }));
+    }
   }, []);
 
   // Initialize data and SSE connection

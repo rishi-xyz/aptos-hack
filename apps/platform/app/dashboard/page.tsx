@@ -36,12 +36,20 @@ export default function DashboardPage() {
       color: "text-blue-600"
     },
     {
-      title: "Total Volume",
-      value: stats.totalVolume,
-      change: "Real-time tracking",
+      title: "Net Volume",
+      value: `${formatAptAmount(stats.netVolume.toString())} APT`,
+      change: stats.netVolume >= 0 ? "Net buying" : "Net selling",
       icon: DollarSign,
+      trend: stats.netVolume >= 0 ? "up" as const : "down" as const,
+      color: stats.netVolume >= 0 ? "text-green-600" : "text-red-600"
+    },
+    {
+      title: "Total Volume",
+      value: `${formatAptAmount(stats.totalVolume.toString())} APT`,
+      change: "All transactions",
+      icon: TrendingUp,
       trend: "up" as const,
-      color: "text-green-600"
+      color: "text-blue-600"
     },
     {
       title: "Alerts",
@@ -94,7 +102,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {statsData.map((stat, index) => (
             <Card key={index} className="bg-white/80 backdrop-blur-sm border-0 shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
