@@ -20,6 +20,12 @@ const stream = new AptosActivityStream({
 // Store subscriptions
 const subscriptions = new Map<string, any>();
 
+// Store SSE clients
+const sseClients = new Set<any>();
+
+// Store latest balance change events
+const latestBalanceChanges = new Map<string, any>();
+
 // Start the stream
 stream.start(8080).then(() => {
   console.log('🚀 Aptos Activity Stream started on port 8080');
@@ -41,12 +47,33 @@ app.post('/add/whale/:walletAddress', async (req: Request, res: Response) => {
     }
     
     // Subscribe to the address
-    const subscription = stream.watchAddress(walletAddress, 'all', (event: any) => {
-      console.log(`🐋 Whale Activity [${walletAddress}]:`, {
+    const subscription = stream.watchAddress(walletAddress, 'balance_change', (event: any) => {
+      console.log(`🐋 Whale Balance Change [${walletAddress}]:`, {
         type: event.type,
         timestamp: new Date(event.timestamp).toISOString(),
         txHash: event.txHash,
         data: event.data
+      });
+      
+      // Store the latest balance change
+      latestBalanceChanges.set(walletAddress, event);
+      
+      // Send to all SSE clients
+      const eventData = {
+        type: 'balance_change',
+        address: walletAddress,
+        timestamp: event.timestamp,
+        txHash: event.txHash,
+        data: event.data
+      };
+      
+      sseClients.forEach(client => {
+        try {
+          client.write(`data: ${JSON.stringify(eventData)}\n\n`);
+        } catch (error) {
+          console.error('Error sending SSE data:', error);
+          sseClients.delete(client);
+        }
       });
     });
     
@@ -114,6 +141,47 @@ app.delete('/whale/:walletAddress', async (req: Request, res: Response) => {
   }
 });
 
+// GET /events - Server-Sent Events endpoint for whale balance changes
+app.get('/events', (req: Request, res: Response) => {
+  // Set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
+
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Connected to whale balance change stream' })}\n\n`);
+
+  // Add client to SSE clients set
+  sseClients.add(res);
+
+  // Send latest balance changes to new client
+  if (latestBalanceChanges.size > 0) {
+    for (const [address, event] of latestBalanceChanges) {
+      const eventData = {
+        type: 'balance_change',
+        address: address,
+        timestamp: event.timestamp,
+        txHash: event.txHash,
+        data: event.data,
+        isLatest: true
+      };
+      res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+    }
+  }
+
+  // Handle client disconnect
+  req.on('close', () => {
+    sseClients.delete(res);
+    console.log('🔌 SSE client disconnected');
+  });
+
+  console.log('🔌 New SSE client connected');
+});
+
 // Health check
 app.get('/health', (req: Request, res: Response) => {
   res.json({ 
@@ -144,5 +212,6 @@ app.listen(PORT, () => {
   console.log(`📡 POST /add/whale/<address> - Add whale to track`);
   console.log(`📋 GET /whales - List tracked whales`);
   console.log(`🗑️  DELETE /whale/<address> - Stop tracking whale`);
+  console.log(`🔌 GET /events - SSE stream for balance changes`);
   console.log(`❤️  GET /health - Health check`);
 });
