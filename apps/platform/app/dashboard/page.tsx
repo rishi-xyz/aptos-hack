@@ -3,7 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Activity, TrendingUp, AlertCircle, Plus, ArrowUpRight, ArrowDownRight, Fish, Clock, DollarSign, Loader2, Wallet } from "lucide-react"
+import { Activity, TrendingUp, AlertCircle, Plus, ArrowUpRight, ArrowDownRight, Fish, Clock, DollarSign, Loader2, Wallet, Wifi, WifiOff, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { useWhales } from "@/hooks/useWhales"
 import { formatDistanceToNow } from "date-fns"
@@ -11,7 +11,7 @@ import { calculateBalanceChanges, formatAptAmount } from "@/lib/api"
 import { useUser } from "@/contexts/UserContext"
 
 export default function DashboardPage() {
-  const { user, connect, disconnect, isLoading: userLoading } = useUser();
+  const { user, connect, disconnect, isLoading: userLoading, backendStatus, connectionError, refreshWhales } = useUser();
   const { whales, loading, error, recentEvents, stats, addWhale, removeWhale } = useWhales(user?.address);
 
   const handleAddWhale = async (address: string) => {
@@ -38,6 +38,17 @@ export default function DashboardPage() {
     }
   }
 
+  // Handle wallet reconnection/refresh
+  const handleRefreshConnection = async () => {
+    if (user?.address) {
+      try {
+        await refreshWhales();
+      } catch (error) {
+        console.error('Failed to refresh connection:', error);
+      }
+    }
+  }
+
   if (userLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-slate-900 dark:to-blue-900 flex items-center justify-center">
@@ -58,6 +69,29 @@ export default function DashboardPage() {
           <p className="text-gray-600 dark:text-gray-300 mb-8">
             Connect your wallet to start tracking whales and managing your trading strategies
           </p>
+          
+          {/* Backend status indicator */}
+          <div className="mb-6">
+            {backendStatus === 'checking' && (
+              <div className="flex items-center justify-center space-x-2 text-yellow-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Checking backend status...</span>
+              </div>
+            )}
+            {backendStatus === 'offline' && (
+              <div className="flex items-center justify-center space-x-2 text-red-600">
+                <WifiOff className="h-4 w-4" />
+                <span className="text-sm">Backend server is offline</span>
+              </div>
+            )}
+            {backendStatus === 'online' && (
+              <div className="flex items-center justify-center space-x-2 text-green-600">
+                <Wifi className="h-4 w-4" />
+                <span className="text-sm">Backend server online</span>
+              </div>
+            )}
+          </div>
+          
           <Button onClick={handleConnectWallet} size="lg" className="bg-blue-600 hover:bg-blue-700 text-white">
             <Wallet className="h-5 w-5 mr-2" />
             Connect Wallet
@@ -120,6 +154,30 @@ export default function DashboardPage() {
     )
   }
 
+  // Show backend error state
+  if (backendStatus === 'offline' || connectionError) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-slate-900 dark:to-blue-900 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <WifiOff className="h-16 w-16 mx-auto mb-4 text-red-600" />
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Backend Offline</h1>
+          <p className="text-gray-600 dark:text-gray-300 mb-8">
+            {connectionError || 'The backend server is currently unavailable. Some features may not work properly.'}
+          </p>
+          <div className="space-y-4">
+            <Button onClick={handleRefreshConnection} variant="outline" className="w-full">
+              <RefreshCw className="h-5 w-5 mr-2" />
+              Retry Connection
+            </Button>
+            <Button onClick={() => window.location.reload()} className="w-full">
+              Refresh Page
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-slate-900 dark:to-blue-900 flex items-center justify-center">
@@ -142,6 +200,34 @@ export default function DashboardPage() {
             <p className="text-lg text-gray-600 dark:text-gray-300">Monitor whale activity in real-time</p>
           </div>
           <div className="flex space-x-3">
+            {/* Backend status indicator */}
+            <div className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-white/80 backdrop-blur-sm border">
+              {backendStatus === 'checking' && (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin text-yellow-600" />
+                  <span className="text-sm text-yellow-600">Checking...</span>
+                </>
+              )}
+              {backendStatus === 'offline' && (
+                <>
+                  <WifiOff className="h-4 w-4 text-red-600" />
+                  <span className="text-sm text-red-600">Offline</span>
+                </>
+              )}
+              {backendStatus === 'online' && (
+                <>
+                  <Wifi className="h-4 w-4 text-green-600" />
+                  <span className="text-sm text-green-600">Online</span>
+                </>
+              )}
+            </div>
+            
+            {/* Refresh connection button */}
+            <Button onClick={handleRefreshConnection} variant="outline" size="sm">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            
             <Link href="/dashboard/strategies">
               <Button size="lg" variant="outline" className="border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white">
                 <TrendingUp className="h-5 w-5 mr-2" />
@@ -154,6 +240,29 @@ export default function DashboardPage() {
                 Add Whale
               </Button>
             </Link>
+          </div>
+        </div>
+
+        {/* User info and backend status */}
+        <div className="mb-6 p-4 bg-white/80 backdrop-blur-sm rounded-lg border">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div>
+                <p className="text-sm text-gray-600">Connected Wallet</p>
+                <p className="font-mono text-sm text-gray-900 dark:text-white">{user.address}</p>
+              </div>
+              {user.whales && (
+                <div>
+                  <p className="text-sm text-gray-600">Tracked Whales</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">{user.whales.length}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center space-x-4">
+              <Button onClick={disconnect} variant="outline" size="sm">
+                Disconnect
+              </Button>
+            </div>
           </div>
         </div>
 
