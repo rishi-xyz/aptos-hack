@@ -13,8 +13,82 @@ export interface BalanceChangeEvent {
   address: string;
   timestamp: number;
   txHash?: string;
-  data: any;
+  data: {
+    previous: TokenBalance[];
+    current: TokenBalance[];
+  };
   isLatest?: boolean;
+}
+
+export interface TokenBalance {
+  coinType: string;
+  amount: string;
+  symbol?: string;
+}
+
+export interface BalanceChange {
+  symbol: string;
+  amount: string;
+  type: 'buy' | 'sell' | 'neutral';
+  previousBalance: string;
+  newBalance: string;
+}
+
+// Utility function to calculate balance changes
+export function calculateBalanceChanges(event: BalanceChangeEvent): BalanceChange[] {
+  const changes: BalanceChange[] = [];
+  const { previous, current } = event.data;
+  
+  // Create maps for easier comparison
+  const previousMap = new Map(previous.map(b => [b.coinType, b.amount]));
+  const currentMap = new Map(current.map(b => [b.coinType, b.amount]));
+  
+  // Check for changes in all tokens
+  const allCoinTypes = new Set([...previous.map(b => b.coinType), ...current.map(b => b.coinType)]);
+  
+  for (const coinType of allCoinTypes) {
+    const prevAmount = previousMap.get(coinType) || '0';
+    const currAmount = currentMap.get(coinType) || '0';
+    
+    if (prevAmount !== currAmount) {
+      const prev = parseFloat(prevAmount);
+      const curr = parseFloat(currAmount);
+      const diff = curr - prev;
+      
+      // Find symbol (default to coinType if not provided)
+      const tokenInfo = current.find(b => b.coinType === coinType) || previous.find(b => b.coinType === coinType);
+      const symbol = tokenInfo?.symbol || coinType.includes('aptos') ? 'APT' : coinType;
+      
+      // Convert from octa to APT (1 APT = 100,000,000 octa)
+      const aptAmount = symbol === 'APT' ? Math.abs(diff) / 100000000 : Math.abs(diff);
+      
+      changes.push({
+        symbol,
+        amount: aptAmount.toString(),
+        type: diff > 0 ? 'buy' : diff < 0 ? 'sell' : 'neutral',
+        previousBalance: prevAmount,
+        newBalance: currAmount
+      });
+    }
+  }
+  
+  return changes;
+}
+
+// Utility function to format APT amount
+export function formatAptAmount(amount: string): string {
+  const num = parseFloat(amount);
+  if (num >= 1000000) {
+    return `${(num / 1000000).toFixed(2)}M`;
+  } else if (num >= 1000) {
+    return `${(num / 1000).toFixed(2)}K`;
+  } else if (num < 0.01) {
+    return `${num.toFixed(6)}`;
+  } else if (num < 1) {
+    return `${num.toFixed(4)}`;
+  } else {
+    return `${num.toFixed(2)}`;
+  }
 }
 
 export interface WhaleStats {

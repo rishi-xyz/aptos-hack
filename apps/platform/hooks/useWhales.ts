@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from 'react';
-import { whaleApi, whaleStream, Whale, BalanceChangeEvent } from '@/lib/api';
+import { whaleApi, whaleStream, Whale, BalanceChangeEvent, calculateBalanceChanges } from '@/lib/api';
 
 export interface WhaleWithStatus extends Whale {
   address: string;

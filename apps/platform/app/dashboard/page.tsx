@@ -7,6 +7,7 @@ import { Activity, TrendingUp, AlertCircle, Plus, ArrowUpRight, ArrowDownRight, 
 import Link from "next/link"
 import { useWhales } from "@/hooks/useWhales"
 import { formatDistanceToNow } from "date-fns"
+import { calculateBalanceChanges, formatAptAmount } from "@/lib/api"
 
 export default function DashboardPage() {
   const { whales, loading, error, recentEvents, stats, addWhale, removeWhale } = useWhales()
@@ -197,20 +198,44 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {recentEvents.map((event, index) => (
-                      <div key={`${event.txHash}-${index}`} className="flex items-start space-x-3">
-                        <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">Balance Change</p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400">
-                            {event.address.slice(0, 6)}...{event.address.slice(-4)}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {formatDistanceToNow(new Date(event.timestamp), { addSuffix: true })}
-                          </p>
+                    {recentEvents.map((event, index) => {
+                      const balanceChanges = calculateBalanceChanges(event);
+                      const aptChange = balanceChanges.find(change => change.symbol === 'APT');
+                      
+                      return (
+                        <div key={`${event.txHash}-${index}`} className="flex items-start space-x-3">
+                          <div className={`w-2 h-2 rounded-full mt-2 ${
+                            aptChange?.type === 'buy' ? 'bg-green-500' : 
+                            aptChange?.type === 'sell' ? 'bg-red-500' : 'bg-yellow-500'
+                          }`}></div>
+                          <div className="flex-1">
+                            {aptChange ? (
+                              <>
+                                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                  {aptChange.type === 'buy' ? 'Buy' : aptChange.type === 'sell' ? 'Sell' : 'Neutral'}: {formatAptAmount(aptChange.amount)} APT
+                                </p>
+                                <p className="text-xs text-gray-600 dark:text-gray-400">
+                                  {event.address.slice(0, 6)}...{event.address.slice(-4)}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {formatDistanceToNow(new Date(event.timestamp), { addSuffix: true })}
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-sm font-medium text-gray-900 dark:text-white">Balance Change</p>
+                                <p className="text-xs text-gray-600 dark:text-gray-400">
+                                  {event.address.slice(0, 6)}...{event.address.slice(-4)}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {formatDistanceToNow(new Date(event.timestamp), { addSuffix: true })}
+                                </p>
+                              </>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
