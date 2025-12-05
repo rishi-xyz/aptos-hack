@@ -1,5 +1,5 @@
 {
-  "name": "aptos-hacks",
+  "name": "whale-stream",
   "private": true,
   "scripts": {
     "build": "turbo run build",
